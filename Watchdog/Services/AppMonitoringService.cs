@@ -6,8 +6,6 @@ namespace Watchdog.Services;
 
 internal class AppMonitoringService : IAppMonitoringService
 {
-    internal int RestartRetryWaitInSeconds { get; set; } = 10;
-
     private readonly IRestartHistoryService _restartHistoryService;
     private readonly IProcessService _processService;
 
@@ -34,13 +32,18 @@ internal class AppMonitoringService : IAppMonitoringService
                     await TryRestartAppAsync(app, logger, token);
                 }
             }
+            catch (OperationCanceledException)
+            {
+                // Task is being cancelled, exit gracefully
+                return;
+            }
             catch (Exception ex)
             {
                 Log.Error(ex, "{ProcessName} monitoring error", app.ProcessName);
                 logger.Error(ex, "{ProcessName} monitoring error", app.ProcessName);
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(app.CheckIntervalSeconds), token);
+            await Task.Delay(app.CheckInterval, token);
         }
 
         logger.Information("{ProcessName} monitoring stopped", app.ProcessName);
@@ -48,9 +51,9 @@ internal class AppMonitoringService : IAppMonitoringService
 
     private async Task TryRestartAppAsync(AppConfig app, ILogger logger, CancellationToken token)
     {
-        if (!_restartHistoryService.CanRestart(app.ProcessName, app.MaxRestartsPerWindow, app.RestartWindowSeconds))
+        if (!_restartHistoryService.CanRestart(app.ProcessName, app.MaxRestartsPerWindow, app.RestartWindow))
         {
-            logger.Error("{ProcessName} restart limit exceeded ({MaxRestartsPerWindow}/{RestartWindowSeconds}sec)", app.ProcessName, app.MaxRestartsPerWindow, app.RestartWindowSeconds);
+            logger.Error("{ProcessName} restart limit exceeded ({MaxRestartsPerWindow}/{RestartWindow})", app.ProcessName, app.MaxRestartsPerWindow, app.RestartWindow);
             return;
         }
 
@@ -60,6 +63,8 @@ internal class AppMonitoringService : IAppMonitoringService
 
         for (var attempt = 1; attempt <= app.RestartAttempts; attempt++)
         {
+            token.ThrowIfCancellationRequested();
+
             success = _processService.StartProcess(app.ExePath, app.ProcessName);
 
             if (success)
@@ -71,7 +76,10 @@ internal class AppMonitoringService : IAppMonitoringService
 
             logger.Warning("{ProcessName} failed to start after {Attempt}/{Total} attempts", app.ProcessName, attempt, app.RestartAttempts);
 
-            await Task.Delay(TimeSpan.FromSeconds(RestartRetryWaitInSeconds), token);
+            if (attempt < app.RestartAttempts)
+            {
+                await Task.Delay(app.RestartRetryWait, token);
+            }
         }
 
         _restartHistoryService.RegisterRestart(app.ProcessName);

@@ -84,7 +84,7 @@ public class ServiceControllerServiceTests
         var service = new ServiceControllerService(factory.Object, searcherFactory.Object, loggerService.Object);
 
         // Act
-        var result = service.StartService("MySvc", 5);
+        var result = service.StartService("MySvc", TimeSpan.FromSeconds(5));
 
         // Assert
         Assert.True(result);
@@ -111,7 +111,7 @@ public class ServiceControllerServiceTests
         var service = new ServiceControllerService(factory.Object, searcherFactory.Object, loggerService.Object);
 
         // Act
-        var result = service.StartService("MySvc", 5);
+        var result = service.StartService("MySvc", TimeSpan.FromSeconds(5));
 
         // Assert
         Assert.False(result);
@@ -134,7 +134,7 @@ public class ServiceControllerServiceTests
         var service = new ServiceControllerService(factory.Object, searcherFactory.Object, loggerService.Object);
 
         // Act
-        var result = service.StartService("MySvc", 5);
+        var result = service.StartService("MySvc", TimeSpan.FromSeconds(5));
 
         // Assert
         Assert.False(result);
@@ -157,7 +157,7 @@ public class ServiceControllerServiceTests
         managementObject.Setup(m => m["StartMode"]).Returns("Automatic");
 
         var searcher = new Mock<IManagementObjectSearcher>();
-        searcher.Setup(s => s.Get()).Returns(new List<IManagementObject> { managementObject.Object });
+        searcher.Setup(s => s.Get()).Returns([managementObject.Object]);
 
         var searcherFactory = new Mock<IManagementObjectSearcherFactory>();
         searcherFactory.Setup(f => f.Create(It.IsAny<string>())).Returns(searcher.Object);
@@ -182,7 +182,7 @@ public class ServiceControllerServiceTests
         loggerService.Setup(l => l.GetLogger("MySvc")).Returns(logger.Object);
 
         var searcher = new Mock<IManagementObjectSearcher>();
-        searcher.Setup(s => s.Get()).Returns(new List<IManagementObject>());
+        searcher.Setup(s => s.Get()).Returns([]);
 
         var searcherFactory = new Mock<IManagementObjectSearcherFactory>();
         searcherFactory.Setup(f => f.Create(It.IsAny<string>())).Returns(searcher.Object);
@@ -231,7 +231,7 @@ public class ServiceControllerServiceTests
         managementObject.Setup(m => m["StartMode"]).Returns((object?)null);
 
         var searcher = new Mock<IManagementObjectSearcher>();
-        searcher.Setup(s => s.Get()).Returns(new List<IManagementObject> { managementObject.Object });
+        searcher.Setup(s => s.Get()).Returns([managementObject.Object]);
 
         var searcherFactory = new Mock<IManagementObjectSearcherFactory>();
         searcherFactory.Setup(f => f.Create(It.IsAny<string>())).Returns(searcher.Object);

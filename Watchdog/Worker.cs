@@ -1,5 +1,5 @@
-﻿using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Serilog;
 using Watchdog.Interfaces;
 using Watchdog.Models;
@@ -8,7 +8,7 @@ namespace Watchdog;
 
 internal class Worker : BackgroundService
 {
-    private readonly IConfiguration _config;
+    private readonly IOptionsMonitor<WatchdogConfig> _config;
     private readonly ILoggerService _loggerService;
     private readonly IAppMonitoringService _appMonitoringService;
     private readonly ISvcMonitoringService _svcMonitoringService;
@@ -16,7 +16,7 @@ internal class Worker : BackgroundService
     private readonly Dictionary<string, CancellationTokenSource> _appTokens = [];
     private readonly Dictionary<string, CancellationTokenSource> _svcTokens = [];
 
-    public Worker(IConfiguration config, ILoggerService loggerService, IAppMonitoringService appMonitoringService, ISvcMonitoringService svcMonitoringService)
+    public Worker(IOptionsMonitor<WatchdogConfig> config, ILoggerService loggerService, IAppMonitoringService appMonitoringService, ISvcMonitoringService svcMonitoringService)
     {
         _config = config;
         _loggerService = loggerService;
@@ -26,19 +26,12 @@ internal class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        void RegisterReloadCallback()
+        _config.OnChange(_ =>
         {
-            _config.GetReloadToken().RegisterChangeCallback(_ =>
-            {
-                Log.Information("Configuration change detected — reloading...");
+            Log.Information("Configuration change detected — reloading...");
+            RestartMonitoring(stoppingToken);
+        });
 
-                RestartMonitoring(stoppingToken);
-                RegisterReloadCallback();
-
-            }, null);
-        }
-
-        RegisterReloadCallback();
         RestartMonitoring(stoppingToken);
 
         try
@@ -55,8 +48,9 @@ internal class Worker : BackgroundService
     {
         CancelAllMonitoring();
 
-        var apps = _config.GetSection("WatchdogConfig:Applications").Get<List<AppConfig>>() ?? [];
-        var services = _config.GetSection("WatchdogConfig:WindowsServices").Get<List<SvcConfig>>() ?? [];
+        var config = _config.CurrentValue;
+        var apps = config.Applications;
+        var services = config.WindowsServices;
 
         Log.Information("Loaded {AppCount} apps and {SvcCount} services for monitoring", apps.Count, services.Count);
 
@@ -90,6 +84,7 @@ internal class Worker : BackgroundService
         {
             Log.Information("Canceling {ProcessName} app monitoring", kvp.Key);
             kvp.Value.Cancel();
+            kvp.Value.Dispose();
         }
         _appTokens.Clear();
 
@@ -99,6 +94,7 @@ internal class Worker : BackgroundService
         {
             Log.Information("Canceling {ServiceName} service monitoring", kvp.Key);
             kvp.Value.Cancel();
+            kvp.Value.Dispose();
         }
         _svcTokens.Clear();
     }

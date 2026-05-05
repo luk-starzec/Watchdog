@@ -54,7 +54,7 @@ internal class ServiceControllerService : IServiceControllerService
         }
     }
 
-    public bool StartService(string serviceName, int timeoutSeconds = 30)
+    public bool StartService(string serviceName, TimeSpan? timeout = null)
     {
         var logger = _loggerService.GetLogger(serviceName);
 
@@ -63,7 +63,7 @@ internal class ServiceControllerService : IServiceControllerService
             using var controller = _controllerFactory.Create(serviceName);
 
             controller.Start();
-            controller.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(timeoutSeconds));
+            controller.WaitForStatus(ServiceControllerStatus.Running, timeout ?? TimeSpan.FromSeconds(30));
 
             if (controller.Status != ServiceControllerStatus.Running)
             {

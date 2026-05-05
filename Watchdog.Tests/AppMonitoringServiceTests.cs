@@ -16,9 +16,9 @@ public class AppMonitoringServiceTests
         {
             ProcessName = "TestApp",
             ExePath = "C:\\TestApp.exe",
-            CheckIntervalSeconds = 1,
+            CheckInterval = TimeSpan.FromSeconds(1),
             MaxRestartsPerWindow = 5,
-            RestartWindowSeconds = 60,
+            RestartWindow = TimeSpan.FromSeconds(60),
             RestartAttempts = 1
         };
 
@@ -27,12 +27,13 @@ public class AppMonitoringServiceTests
         var processServiceMock = new Mock<IProcessService>();
 
         restartHistoryMock
-            .Setup(r => r.CanRestart(app.ProcessName, app.MaxRestartsPerWindow, app.RestartWindowSeconds))
+            .Setup(r => r.CanRestart(app.ProcessName, app.MaxRestartsPerWindow, app.RestartWindow))
             .Returns(true);
 
         processServiceMock.Setup(p => p.IsProcessRunning(app.ProcessName)).Returns(false);
         processServiceMock.Setup(p => p.StartProcess(app.ExePath, app.ProcessName)).Returns(true);
 
+        app.RestartRetryWait = TimeSpan.Zero;
         var monitoring = new AppMonitoringService(restartHistoryMock.Object, processServiceMock.Object);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
@@ -69,9 +70,9 @@ public class AppMonitoringServiceTests
         {
             ProcessName = "TestApp",
             ExePath = "C:\\TestApp.exe",
-            CheckIntervalSeconds = 1,
-            MaxRestartsPerWindow = 1,
-            RestartWindowSeconds = 60,
+            CheckInterval = TimeSpan.FromSeconds(1),
+            MaxRestartsPerWindow = 5,
+            RestartWindow = TimeSpan.FromSeconds(60),
             RestartAttempts = 1
         };
 
@@ -80,9 +81,10 @@ public class AppMonitoringServiceTests
         var processServiceMock = new Mock<IProcessService>();
 
         restartHistoryMock
-            .Setup(r => r.CanRestart(app.ProcessName, app.MaxRestartsPerWindow, app.RestartWindowSeconds))
+            .Setup(r => r.CanRestart(app.ProcessName, app.MaxRestartsPerWindow, app.RestartWindow))
             .Returns(false);
 
+        app.RestartRetryWait = TimeSpan.Zero;
         var monitoring = new AppMonitoringService(restartHistoryMock.Object, processServiceMock.Object);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
@@ -102,7 +104,7 @@ public class AppMonitoringServiceTests
             It.Is<string>(s => s.Contains("restart limit exceeded")),
             app.ProcessName,
             app.MaxRestartsPerWindow,
-            app.RestartWindowSeconds
+            app.RestartWindow
         ), Times.AtLeastOnce);
     }
 
@@ -114,9 +116,9 @@ public class AppMonitoringServiceTests
         {
             ProcessName = "TestApp",
             ExePath = "C:\\TestApp.exe",
-            CheckIntervalSeconds = 1,
+            CheckInterval = TimeSpan.FromSeconds(1),
             MaxRestartsPerWindow = 5,
-            RestartWindowSeconds = 60,
+            RestartWindow = TimeSpan.FromSeconds(60),
             RestartAttempts = 1
         };
 
@@ -126,6 +128,7 @@ public class AppMonitoringServiceTests
 
         processServiceMock.Setup(p => p.IsProcessRunning(app.ProcessName)).Returns(true);
 
+        app.RestartRetryWait = TimeSpan.Zero;
         var monitoring = new AppMonitoringService(restartHistoryMock.Object, processServiceMock.Object);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
@@ -155,9 +158,9 @@ public class AppMonitoringServiceTests
         {
             ProcessName = "TestApp",
             ExePath = "C:\\TestApp.exe",
-            CheckIntervalSeconds = 1,
+            CheckInterval = TimeSpan.FromSeconds(1),
             MaxRestartsPerWindow = 5,
-            RestartWindowSeconds = 60,
+            RestartWindow = TimeSpan.FromSeconds(60),
             RestartAttempts = 3
         };
 
@@ -166,7 +169,7 @@ public class AppMonitoringServiceTests
         var processServiceMock = new Mock<IProcessService>();
 
         restartHistoryMock
-            .Setup(r => r.CanRestart(app.ProcessName, app.MaxRestartsPerWindow, app.RestartWindowSeconds))
+            .Setup(r => r.CanRestart(app.ProcessName, app.MaxRestartsPerWindow, app.RestartWindow))
             .Returns(true);
 
         processServiceMock.Setup(p => p.IsProcessRunning(app.ProcessName)).Returns(false);
@@ -175,10 +178,8 @@ public class AppMonitoringServiceTests
             .Returns(false)
             .Returns(true);
 
-        var monitoring = new AppMonitoringService(restartHistoryMock.Object, processServiceMock.Object)
-        {
-            RestartRetryWaitInSeconds = 0
-        };
+        app.RestartRetryWait = TimeSpan.Zero;
+        var monitoring = new AppMonitoringService(restartHistoryMock.Object, processServiceMock.Object);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1000));
 
@@ -190,7 +191,7 @@ public class AppMonitoringServiceTests
         catch (TaskCanceledException) { }
 
         // Assert
-        processServiceMock.Verify(p => p.StartProcess(app.ExePath, app.ProcessName), Times.AtLeast(3));
+        processServiceMock.Verify(p => p.StartProcess(app.ExePath, app.ProcessName), Times.Exactly(3));
         loggerMock.Verify(l => l.Information(
             It.Is<string>(s => s.Contains("started after")),
             app.ProcessName,

@@ -7,8 +7,6 @@ namespace Watchdog.Services;
 
 internal class SvcMonitoringService : ISvcMonitoringService
 {
-    internal int RestartRetryWaitInSeconds { get; set; } = 10;
-
     private readonly IRestartHistoryService _restartHistoryService;
     private readonly IServiceControllerService _serviceControllerService;
 
@@ -20,16 +18,17 @@ internal class SvcMonitoringService : ISvcMonitoringService
 
     public async Task MonitorServiceAsync(SvcConfig svc, ILogger logger, CancellationToken token)
     {
+        var (shouldSkip, mode) = GetSkipDetails(svc.ServiceName);
+        if (shouldSkip)
+        {
+            logger.Warning("{ServiceName} skipped (mode: {Mode}).", svc.ServiceName, mode);
+            return;
+        }
+
         while (!token.IsCancellationRequested)
         {
             try
             {
-                if (ShouldSkipService(svc.ServiceName, logger))
-                {
-                    await DelayAsync(svc.CheckIntervalSeconds, token);
-                    continue;
-                }
-
                 var status = _serviceControllerService.GetStatus(svc.ServiceName);
 
                 if (status == ServiceControllerStatus.Running)
@@ -41,42 +40,41 @@ internal class SvcMonitoringService : ISvcMonitoringService
                     await TryRestartServiceAsync(svc, logger, token);
                 }
             }
+            catch (OperationCanceledException)
+            {
+                // Task is being cancelled, exit gracefully
+                return;
+            }
             catch (Exception ex)
             {
                 Log.Error(ex, "{ServiceName} monitoring error", svc.ServiceName);
                 logger.Error(ex, "{ServiceName} monitoring error", svc.ServiceName);
             }
 
-            await DelayAsync(svc.CheckIntervalSeconds, token);
+            await Task.Delay(svc.CheckInterval, token);
         }
 
         logger.Information("{ServiceName} monitoring stopped", svc.ServiceName);
     }
 
-    private bool ShouldSkipService(string serviceName, ILogger logger)
+    private (bool shouldSkip, string mode) GetSkipDetails(string serviceName)
     {
-        var startMode = _serviceControllerService.GetStartMode(serviceName);
-
-        if (startMode != "Automatic" && startMode != "Auto")
+        try
         {
-            logger.Warning("{ServiceName} skipped (mode: {Mode}).", serviceName, startMode);
-            return true;
+            var startMode = _serviceControllerService.GetStartMode(serviceName);
+            return (startMode != "Automatic" && startMode != "Auto", startMode);
         }
-
-        return false;
-    }
-
-
-    private async Task DelayAsync(int delayInSeconds, CancellationToken token)
-    {
-        await Task.Delay(TimeSpan.FromSeconds(delayInSeconds), token);
+        catch
+        {
+            return (true, "Error");
+        }
     }
 
     private async Task TryRestartServiceAsync(SvcConfig svc, ILogger log, CancellationToken token)
     {
-        if (!_restartHistoryService.CanRestart(svc.ServiceName, svc.MaxRestartsPerWindow, svc.RestartWindowSeconds))
+        if (!_restartHistoryService.CanRestart(svc.ServiceName, svc.MaxRestartsPerWindow, svc.RestartWindow))
         {
-            log.Error("{ServiceName} restart limit exceeded ({MaxRestartsPerWindow}/{RestartWindowSeconds}sec)", svc.ServiceName, svc.MaxRestartsPerWindow, svc.RestartWindowSeconds);
+            log.Error("{ServiceName} restart limit exceeded ({MaxRestartsPerWindow}/{RestartWindow})", svc.ServiceName, svc.MaxRestartsPerWindow, svc.RestartWindow);
             return;
         }
 
@@ -86,6 +84,8 @@ internal class SvcMonitoringService : ISvcMonitoringService
 
         for (var attempt = 1; attempt <= svc.RestartAttempts; attempt++)
         {
+            token.ThrowIfCancellationRequested();
+
             success = _serviceControllerService.StartService(svc.ServiceName);
 
             if (success)
@@ -100,7 +100,7 @@ internal class SvcMonitoringService : ISvcMonitoringService
                 log.Warning("{ServiceName} failed to start after {Attempt}/{Total} attempts", svc.ServiceName, attempt, svc.RestartAttempts);
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(RestartRetryWaitInSeconds), token);
+            await Task.Delay(svc.RestartRetryWait, token);
         }
 
         _restartHistoryService.RegisterRestart(svc.ServiceName);

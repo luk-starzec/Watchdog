@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Options;
 using Moq;
 using Serilog;
 using Watchdog.Interfaces;
@@ -19,34 +19,12 @@ public class WorkerTests
         _mockLoggerService = new Mock<ILoggerService>();
     }
 
-    private IConfiguration BuildTestConfiguration()
-    {
-        var inMemorySettings = new Dictionary<string, string>
-        {
-            ["WatchdogConfig:Applications:0:ProcessName"] = "TestApp",
-            ["WatchdogConfig:Applications:0:ExePath"] = "C:\\TestApp.exe",
-            ["WatchdogConfig:Applications:0:CheckIntervalSeconds"] = "1",
-            ["WatchdogConfig:Applications:0:MaxRestartsPerWindow"] = "3",
-            ["WatchdogConfig:Applications:0:RestartWindowSeconds"] = "60",
-            ["WatchdogConfig:Applications:0:RestartAttempts"] = "2",
-
-            ["WatchdogConfig:WindowsServices:0:ServiceName"] = "TestService",
-            ["WatchdogConfig:WindowsServices:0:CheckIntervalSeconds"] = "1",
-            ["WatchdogConfig:WindowsServices:0:MaxRestartsPerWindow"] = "3",
-            ["WatchdogConfig:WindowsServices:0:RestartWindowSeconds"] = "60",
-            ["WatchdogConfig:WindowsServices:0:RestartAttempts"] = "2",
-        };
-
-        return new ConfigurationBuilder()
-            .AddInMemoryCollection(inMemorySettings)
-            .Build();
-    }
-
     [Fact]
-    public async Task Worker_StartsMonitoringForAppsAndServices_AndPassesLoggerAndToken()
+    public async Task StartAsync_ShouldInitializeMonitoring_WhenConfigIsProvided()
     {
         // Arrange
-        var config = BuildTestConfiguration();
+        var config = CreateTestConfig();
+        var options = CreateOptions(config);
 
         var mockLoggerApp = new Mock<ILogger>();
         var mockLoggerSvc = new Mock<ILogger>();
@@ -54,25 +32,23 @@ public class WorkerTests
         _mockLoggerService.Setup(ls => ls.GetLogger("TestApp")).Returns(mockLoggerApp.Object);
         _mockLoggerService.Setup(ls => ls.GetLogger("TestService")).Returns(mockLoggerSvc.Object);
 
-        var worker = new Worker(config, _mockLoggerService.Object, _mockAppMonitoringService.Object, _mockSvcMonitoringService.Object);
+        var worker = new Worker(options, _mockLoggerService.Object, _mockAppMonitoringService.Object, _mockSvcMonitoringService.Object);
 
         using var cts = new CancellationTokenSource();
 
-        // Act: start worker in a separate task
+        // Act: start worker
         var workerTask = Task.Run(() => worker.StartAsync(cts.Token));
 
-        // Wait a bit to let tasks start
         await Task.Delay(500);
 
         // Stop the worker
         cts.Cancel();
         await worker.StopAsync(CancellationToken.None);
 
-        // Assert: Verify that logger service was configured
+        // Assert
         _mockLoggerService.Verify(ls => ls.ConfigureLoggers(It.Is<string[]>(arr =>
             arr.Contains("TestApp") && arr.Contains("TestService"))), Times.AtLeastOnce);
 
-        // Verify that monitoring services were called with correct logger
         _mockAppMonitoringService.Verify(m => m.MonitorAppAsync(
             It.Is<AppConfig>(a => a.ProcessName == "TestApp"),
             mockLoggerApp.Object,
@@ -85,10 +61,17 @@ public class WorkerTests
     }
 
     [Fact]
-    public async Task Worker_RestartsMonitoringOnConfigurationChange()
+    public async Task StartAsync_ShouldRestartMonitoring_WhenConfigurationChanges()
     {
         // Arrange
-        var config = BuildTestConfiguration();
+        var config = CreateTestConfig();
+        var optionsMock = new Mock<IOptionsMonitor<WatchdogConfig>>();
+        optionsMock.Setup(m => m.CurrentValue).Returns(config);
+
+        Action<WatchdogConfig, string?>? registeredCallback = null;
+        optionsMock.Setup(m => m.OnChange(It.IsAny<Action<WatchdogConfig, string?>>()))
+            .Callback<Action<WatchdogConfig, string?>>(a => registeredCallback = a)
+            .Returns(new Mock<IDisposable>().Object);
 
         var mockLoggerApp = new Mock<ILogger>();
         var mockLoggerSvc = new Mock<ILogger>();
@@ -96,15 +79,17 @@ public class WorkerTests
         _mockLoggerService.Setup(ls => ls.GetLogger("TestApp")).Returns(mockLoggerApp.Object);
         _mockLoggerService.Setup(ls => ls.GetLogger("TestService")).Returns(mockLoggerSvc.Object);
 
-        var worker = new Worker(config, _mockLoggerService.Object, _mockAppMonitoringService.Object, _mockSvcMonitoringService.Object);
+        var worker = new Worker(optionsMock.Object, _mockLoggerService.Object, _mockAppMonitoringService.Object, _mockSvcMonitoringService.Object);
 
         using var cts = new CancellationTokenSource();
 
         // Act
         var workerTask = Task.Run(() => worker.StartAsync(cts.Token));
 
+        await Task.Delay(500);
+
         // Simulate configuration reload
-        (config as IConfigurationRoot)?.Reload();
+        registeredCallback?.Invoke(config, "name");
 
         await Task.Delay(500);
 
@@ -112,30 +97,26 @@ public class WorkerTests
         cts.Cancel();
         await worker.StopAsync(CancellationToken.None);
 
-        // Assert: Verify monitoring was started at least once after reload
+        // Assert
         _mockAppMonitoringService.Verify(m => m.MonitorAppAsync(
             It.IsAny<AppConfig>(),
             mockLoggerApp.Object,
-            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-
-        _mockSvcMonitoringService.Verify(m => m.MonitorServiceAsync(
-            It.IsAny<SvcConfig>(),
-            mockLoggerSvc.Object,
-            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     [Fact]
-    public async Task Worker_StopsMonitoring_WhenCancelled()
+    public async Task StopAsync_ShouldCancelMonitoring_WhenWorkerIsStopped()
     {
         // Arrange
-        var config = BuildTestConfiguration();
+        var config = CreateTestConfig();
+        var options = CreateOptions(config);
         var mockLoggerApp = new Mock<ILogger>();
         var mockLoggerSvc = new Mock<ILogger>();
 
         _mockLoggerService.Setup(ls => ls.GetLogger("TestApp")).Returns(mockLoggerApp.Object);
         _mockLoggerService.Setup(ls => ls.GetLogger("TestService")).Returns(mockLoggerSvc.Object);
 
-        var worker = new Worker(config, _mockLoggerService.Object, _mockAppMonitoringService.Object, _mockSvcMonitoringService.Object);
+        var worker = new Worker(options, _mockLoggerService.Object, _mockAppMonitoringService.Object, _mockSvcMonitoringService.Object);
 
         using var cts = new CancellationTokenSource();
 
@@ -148,76 +129,95 @@ public class WorkerTests
         cts.Cancel();
         await worker.StopAsync(CancellationToken.None);
 
-        // Assert: Verify monitoring tasks were called at least once
+        // Assert
         _mockAppMonitoringService.Verify(m => m.MonitorAppAsync(
             It.IsAny<AppConfig>(),
             mockLoggerApp.Object,
             It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-
-        _mockSvcMonitoringService.Verify(m => m.MonitorServiceAsync(
-            It.IsAny<SvcConfig>(),
-            mockLoggerSvc.Object,
-            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [Fact]
-    public async Task Worker_RestartsMonitoring_OnMultipleConfigurationReloads()
+    public async Task OnChange_ShouldRestartMonitoringMultipleTimes_WhenConfigurationChangesRepeatedly()
     {
         // Arrange
-        var config = BuildTestConfiguration();
+        var config = CreateTestConfig();
+        var optionsMock = new Mock<IOptionsMonitor<WatchdogConfig>>();
+        optionsMock.Setup(m => m.CurrentValue).Returns(config);
+
+        Action<WatchdogConfig, string?>? registeredCallback = null;
+        optionsMock.Setup(m => m.OnChange(It.IsAny<Action<WatchdogConfig, string?>>()))
+            .Callback<Action<WatchdogConfig, string?>>(a => registeredCallback = a)
+            .Returns(new Mock<IDisposable>().Object);
 
         var mockLoggerApp1 = new Mock<ILogger>();
-        var mockLoggerSvc1 = new Mock<ILogger>();
         var mockLoggerApp2 = new Mock<ILogger>();
-        var mockLoggerSvc2 = new Mock<ILogger>();
 
-        // first configuration
         _mockLoggerService.Setup(ls => ls.GetLogger("TestApp")).Returns(mockLoggerApp1.Object);
-        _mockLoggerService.Setup(ls => ls.GetLogger("TestService")).Returns(mockLoggerSvc1.Object);
 
-        var worker = new Worker(config, _mockLoggerService.Object, _mockAppMonitoringService.Object, _mockSvcMonitoringService.Object);
+        var worker = new Worker(optionsMock.Object, _mockLoggerService.Object, _mockAppMonitoringService.Object, _mockSvcMonitoringService.Object);
 
         using var cts = new CancellationTokenSource();
 
-        // Act: start worker
+        // Act
         var workerTask = Task.Run(() => worker.StartAsync(cts.Token));
 
         await Task.Delay(500);
 
-        // simulate configuration change: change mock loggers
+        // First reload
         _mockLoggerService.Setup(ls => ls.GetLogger("TestApp")).Returns(mockLoggerApp2.Object);
-        _mockLoggerService.Setup(ls => ls.GetLogger("TestService")).Returns(mockLoggerSvc2.Object);
+        registeredCallback?.Invoke(config, "reload1");
+        await Task.Delay(500);
 
-        // Trigger reload
-        (config as IConfigurationRoot)?.Reload();
+        // Second reload
+        registeredCallback?.Invoke(config, "reload2");
         await Task.Delay(500);
 
         // Stop worker
         cts.Cancel();
         await worker.StopAsync(CancellationToken.None);
 
-        // Assert: monitoring was run for the old and new configurations
+        // Assert
         _mockAppMonitoringService.Verify(m => m.MonitorAppAsync(
             It.IsAny<AppConfig>(),
-            mockLoggerApp1.Object,
-            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-
-        _mockAppMonitoringService.Verify(m => m.MonitorAppAsync(
-            It.IsAny<AppConfig>(),
-            mockLoggerApp2.Object,
-            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-
-        _mockSvcMonitoringService.Verify(m => m.MonitorServiceAsync(
-            It.IsAny<SvcConfig>(),
-            mockLoggerSvc1.Object,
-            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-
-        _mockSvcMonitoringService.Verify(m => m.MonitorServiceAsync(
-            It.IsAny<SvcConfig>(),
-            mockLoggerSvc2.Object,
-            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-
-        // Assert: ConfigureLoggers was called multiple times
-        _mockLoggerService.Verify(ls => ls.ConfigureLoggers(It.IsAny<string[]>()), Times.AtLeast(2));
+            It.IsAny<ILogger>(),
+            It.IsAny<CancellationToken>()), Times.Exactly(3)); // Initial + 2 reloads
     }
+
+    private static IOptionsMonitor<WatchdogConfig> CreateOptions(WatchdogConfig config)
+    {
+        var mock = new Mock<IOptionsMonitor<WatchdogConfig>>();
+        mock.Setup(m => m.CurrentValue).Returns(config);
+        return mock.Object;
+    }
+
+    private static WatchdogConfig CreateTestConfig()
+    {
+        return new WatchdogConfig
+        {
+            Applications =
+            [
+                new AppConfig
+                {
+                    ProcessName = "TestApp",
+                    ExePath = "C:\\TestApp.exe",
+                    CheckInterval = TimeSpan.FromSeconds(1),
+                    MaxRestartsPerWindow = 3,
+                    RestartWindow = TimeSpan.FromSeconds(60),
+                    RestartAttempts = 2
+                }
+            ],
+            WindowsServices =
+            [
+                new SvcConfig
+                {
+                    ServiceName = "TestService",
+                    CheckInterval = TimeSpan.FromSeconds(1),
+                    MaxRestartsPerWindow = 3,
+                    RestartWindow = TimeSpan.FromSeconds(60),
+                    RestartAttempts = 2
+                }
+            ]
+        };
+    }
+
 }

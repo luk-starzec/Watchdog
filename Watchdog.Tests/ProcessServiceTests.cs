@@ -14,7 +14,7 @@ public class ProcessServiceTests
     {
         // Arrange
         var launcher = new Mock<IProcessLauncher>();
-        launcher.Setup(p => p.GetProcessesByName("MyApp")).Returns(new[] { new System.Diagnostics.Process() });
+        launcher.Setup(p => p.GetProcessesByName("MyApp")).Returns([new System.Diagnostics.Process()]);
 
         var logger = new Mock<ILogger>();
         var loggerService = new Mock<ILoggerService>();
@@ -34,7 +34,7 @@ public class ProcessServiceTests
     {
         // Arrange
         var launcher = new Mock<IProcessLauncher>();
-        launcher.Setup(p => p.GetProcessesByName("MyApp")).Returns(Array.Empty<System.Diagnostics.Process>());
+        launcher.Setup(p => p.GetProcessesByName("MyApp")).Returns([]);
 
         var logger = new Mock<ILogger>();
         var loggerService = new Mock<ILoggerService>();

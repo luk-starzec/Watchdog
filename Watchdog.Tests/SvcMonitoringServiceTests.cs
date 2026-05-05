@@ -18,9 +18,9 @@ public class SvcMonitoringServiceTests
         var svc = new SvcConfig
         {
             ServiceName = "TestSvc",
-            CheckIntervalSeconds = 1,
+            CheckInterval = TimeSpan.FromSeconds(1),
             MaxRestartsPerWindow = 5,
-            RestartWindowSeconds = 60,
+            RestartWindow = TimeSpan.FromSeconds(60),
             RestartAttempts = 1
         };
 
@@ -29,7 +29,7 @@ public class SvcMonitoringServiceTests
         var serviceControllerMock = new Mock<IServiceControllerService>();
 
         restartHistoryMock
-            .Setup(r => r.CanRestart(svc.ServiceName, svc.MaxRestartsPerWindow, svc.RestartWindowSeconds))
+            .Setup(r => r.CanRestart(svc.ServiceName, svc.MaxRestartsPerWindow, svc.RestartWindow))
             .Returns(true);
 
         serviceControllerMock
@@ -41,10 +41,10 @@ public class SvcMonitoringServiceTests
             .Returns(ServiceControllerStatus.Stopped);
 
         serviceControllerMock
-            .Setup(s => s.StartService(svc.ServiceName, It.IsAny<int>()))
+            .Setup(s => s.StartService(svc.ServiceName, It.IsAny<TimeSpan?>()))
             .Returns(true);
 
-        var monitoring = new SvcMonitoringService(restartHistoryMock.Object, null, serviceControllerMock.Object);
+        var monitoring = new SvcMonitoringService(restartHistoryMock.Object, Mock.Of<ILoggerService>(), serviceControllerMock.Object);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 
@@ -78,9 +78,9 @@ public class SvcMonitoringServiceTests
         var svc = new SvcConfig
         {
             ServiceName = "TestSvc",
-            CheckIntervalSeconds = 1,
+            CheckInterval = TimeSpan.FromSeconds(1),
             MaxRestartsPerWindow = 1,
-            RestartWindowSeconds = 60,
+            RestartWindow = TimeSpan.FromSeconds(60),
             RestartAttempts = 1
         };
 
@@ -93,10 +93,10 @@ public class SvcMonitoringServiceTests
             .Returns("Automatic");
 
         restartHistoryMock
-            .Setup(r => r.CanRestart(svc.ServiceName, svc.MaxRestartsPerWindow, svc.RestartWindowSeconds))
+            .Setup(r => r.CanRestart(svc.ServiceName, svc.MaxRestartsPerWindow, svc.RestartWindow))
             .Returns(false);
 
-        var monitoring = new SvcMonitoringService(restartHistoryMock.Object, null, serviceControllerMock.Object);
+        var monitoring = new SvcMonitoringService(restartHistoryMock.Object, Mock.Of<ILoggerService>(), serviceControllerMock.Object);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 
@@ -115,7 +115,7 @@ public class SvcMonitoringServiceTests
             It.Is<string>(s => s.Contains("restart limit exceeded")),
             svc.ServiceName,
             svc.MaxRestartsPerWindow,
-            svc.RestartWindowSeconds
+            svc.RestartWindow
         ), Times.AtLeastOnce);
     }
 
@@ -126,9 +126,9 @@ public class SvcMonitoringServiceTests
         var svc = new SvcConfig
         {
             ServiceName = "TestSvc",
-            CheckIntervalSeconds = 1,
+            CheckInterval = TimeSpan.FromSeconds(1),
             MaxRestartsPerWindow = 5,
-            RestartWindowSeconds = 60,
+            RestartWindow = TimeSpan.FromSeconds(60),
             RestartAttempts = 1
         };
 
@@ -138,7 +138,7 @@ public class SvcMonitoringServiceTests
 
         serviceControllerMock.Setup(s => s.GetStartMode(svc.ServiceName)).Returns("Manual");
 
-        var monitoring = new SvcMonitoringService(restartHistoryMock.Object, null, serviceControllerMock.Object);
+        var monitoring = new SvcMonitoringService(restartHistoryMock.Object, Mock.Of<ILoggerService>(), serviceControllerMock.Object);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 
@@ -164,9 +164,9 @@ public class SvcMonitoringServiceTests
         var svc = new SvcConfig
         {
             ServiceName = "TestSvc",
-            CheckIntervalSeconds = 1,
+            CheckInterval = TimeSpan.FromSeconds(1),
             MaxRestartsPerWindow = 5,
-            RestartWindowSeconds = 60,
+            RestartWindow = TimeSpan.FromSeconds(60),
             RestartAttempts = 1
         };
 
@@ -177,9 +177,9 @@ public class SvcMonitoringServiceTests
         serviceControllerMock.Setup(s => s.GetStartMode(svc.ServiceName)).Returns("Automatic");
         serviceControllerMock.Setup(s => s.GetStatus(svc.ServiceName)).Returns(ServiceControllerStatus.Running);
 
-        var monitoring = new SvcMonitoringService(restartHistoryMock.Object, null, serviceControllerMock.Object);
+        var monitoring = new SvcMonitoringService(restartHistoryMock.Object, Mock.Of<ILoggerService>(), serviceControllerMock.Object);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
 
         // Act
         try

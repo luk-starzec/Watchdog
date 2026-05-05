@@ -1,7 +1,7 @@
-﻿namespace Watchdog.Interfaces;
+namespace Watchdog.Interfaces;
 
-internal interface IRestartHistoryService
+public interface IRestartHistoryService
 {
-    bool CanRestart(string name, int maxRestarts, int windowSeconds);
+    bool CanRestart(string name, int maxRestarts, TimeSpan window);
     void RegisterRestart(string name);
 }

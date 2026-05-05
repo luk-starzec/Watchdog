@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using Watchdog;
 using Watchdog.Interfaces;
+using Watchdog.Models;
 using Watchdog.Services;
 
 var configuration = new ConfigurationBuilder()
@@ -30,18 +31,19 @@ try
     Log.Information("Starting Watchdog Service (mode: {Mode})", runAsConsole ? "Console" : "WindowsService");
 
     var builder = Host.CreateDefaultBuilder(args)
-        .ConfigureAppConfiguration((_, config) =>
-        {
-            config.AddConfiguration(configuration);
-        })
         .UseSerilog()
         .ConfigureServices((context, services) =>
         {
+            services.AddOptions<WatchdogConfig>()
+                .Bind(configuration.GetSection("WatchdogConfig"))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+
             services.AddHostedService<Worker>();
             services.AddSingleton<ILoggerService, LoggerService>();
             services.AddSingleton<IAppMonitoringService, AppMonitoringService>();
             services.AddSingleton<ISvcMonitoringService, SvcMonitoringService>();
-            services.AddTransient<IRestartHistoryService, RestartHistoryService>();
+            services.AddSingleton<IRestartHistoryService, RestartHistoryService>();
             services.AddTransient<IProcessService, ProcessService>();
             services.AddTransient<IProcessLauncher, ProcessLauncher>();
             services.AddTransient<IServiceControllerService, ServiceControllerService>();
